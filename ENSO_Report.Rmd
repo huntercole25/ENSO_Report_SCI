@@ -1,0 +1,142 @@
+---
+title: "SCI ENSO Report"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+      fig_caption: true
+      toc: true
+      toc_float: true
+      toc_collapsed: false
+      toc_depth: 2
+      number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(data.table)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+library(plotly)
+library(HuntersToolbox)
+```
+
+```{r Prep, fig.align = "center", fig.width = 10, fig.height = 8}
+TempProbs <- fread("https://ftp.cpc.ncep.noaa.gov/wd53du/sstcon34t.txt")
+OniHistoric <- fread("https://origin.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt")
+
+OniHistoric[,PlotDate := ymd(paste0(YR, "-", MON, "-01"))]
+
+setorder(OniHistoric, PlotDate)
+
+for(i in 2:(nrow(OniHistoric)-1)){
+  OniHistoric[i, ThreeMonthOni := mean(OniHistoric[(i-1):(i+1), ANOM])]
+}
+
+OniHistoric_Comp <- OniHistoric[!is.na(ThreeMonthOni)]
+
+OniHistoric_Comp[,Type := "Observed"]
+
+TempProbs[,Type := "Projected"]
+
+CalcDate <- mdy(paste0(read.delim("https://ftp.cpc.ncep.noaa.gov/wd53du/sstcon34t.txt",
+                                  header = F, nrows = 1, sep = " ")[,8:10], collapse = " "))
+
+# strftime(CalcDate, "%b %d, %Y")
+
+setnames(TempProbs, c("Season", "Below_1", "Normal_1", "Above_1", "Below_2", "Normal_2", "Above_2", "Deg_C", "Anomaly", "Type"))
+
+TempProbs[,Time := 1:nrow(TempProbs)]
+
+AnomalyClass <- data.table(Anomaly_Low = c(-2, -1.5, -1, 0.5, 1, 1.5, 2), Anomaly_High = c(-1.5, -1, -0.5, 1, 1.5, 2, 2.5),
+                           Class = c(rep("La Niña", 3), rep("El Niño", 4)),
+                           MagnitudeChr = c("Strong", "Moderate", "Weak", "Weak", "Moderate", "Strong", "Very Strong"))
+
+AnomalyClass[,Magnitude := factor(MagnitudeChr, levels = c("Weak", "Moderate", "Strong", "Very Strong"))]
+
+MaxHistoric <- max(OniHistoric_Comp$PlotDate)
+
+TempProbs[,PlotDate := MaxHistoric + months(Time)]
+
+ProbLong <- as.data.table(pivot_longer(TempProbs[,c("PlotDate", "Below_2", "Normal_2", "Above_2")], c("Below_2", "Normal_2", "Above_2")))
+
+ProbLong_2 <- merge(ProbLong, data.table(name = paste(c("Below", "Normal", "Above"), 2, sep = "_"),
+                                       Scenario = factor(c("La Niña", "Neutral", "El Niño"), levels = c("El Niño", "Neutral", "La Niña"))))
+
+ProbLong_2[,Width := as.numeric(days_in_month(PlotDate))]
+```
+# ENSO Description  
+  
+El Niño and the Southern Oscillation (ENSO) is an irregular cyclical variation in sea surface temperatures (SST) and barometric pressure in the equatorial Pacific. El Niño/La Niña conditions are classified based on equatorial Pacific SST anomalies, particularly in the Niño 3.4 region.    
+  
+![](https://www.ncei.noaa.gov/monitoring-content/teleconnections/nino-regions.gif){#id .class width=100% height=100%}  
+\  
+  
+El Niño conditions arise from higher-than-ordinary sea surface temperatures in the equatorial Pacific driven by weakened trade winds. During neutral climate conditions, these winds circulate warm water eastward away from the Americas causing upwelling of cold water in the equatorial Pacific. During El Niño conditions, a lack of upwelling leads to increased SSTs, which in turn cause the Pacific jet stream to shift south. For San Clemente Island (SCI), this typically means cooler temperatures and increased rainfall.  
+  
+La Niña conditions arise from the opposite phenomenon -- exceptionally strong trade winds blowing water in the eastern Pacific to the west, causing more extreme upwelling of cold water. This leads to exceptionally low SSTs in the equatorial Pacific which shifts the Pacific jet stream north. For San Clemente Island (SCI), this typically means warmer temperatures and drought conditions.  
+    
+![](https://www.climate.gov/sites/default/files/2022-05/ENSO_US_globes_1200.jpg){#id .class width=100% height=100%}  
+  
+# Observed and Projected Conditions  
+  
+## Animated SST Map  
+  
+Below is an animated map showing SST anomalies in the equatorial Pacific for the past ~2.5 months.  
+  
+![](https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_update/sstaanim.gif){#id .class width=100% height=100%}  
+  
+## Predicted ENSO Condition Probabilities  
+  
+ENSO conditions are often described using Oceanic Niño Index (ONI) values, which are running 3-month means of SST anomalies (in °C) in Niño region 3.4. Here, these are referred to as "ONI Seasons", with associated date labels representing the central month of a three month season (e.g., data labelled with "May `24" corresponds to mean SST anomalies from April 2024--June 2024). The figure below shows predicted cumulative probabilities of ENSO conditions for the upcoming 16 ONI seasons, with predicted 3-month running mean SST anomalies >= 0.5 °C and <= -0.5 °C being associated with El Niño and La Niña conditions, respectively.  
+    
+```{r Probability_Plot, fig.align = "center", fig.width = 10, fig.height = 8}
+ggplot(ProbLong_2, aes(PlotDate, value, fill = Scenario))+
+  geom_col(alpha = 0.7, just = 0, width = ProbLong_2$Width)+
+  labs(x = "Center Month of ONI Season (3 months)", y = "Probability")+
+  scale_fill_manual(name = "Climatic Condition", values = c("dodgerblue", "#FFC20A", "mediumvioletred"))+
+  scale_x_date(breaks = seq.Date(min(ProbLong_2$PlotDate), max(ProbLong_2$PlotDate), "3 months"),
+               date_minor_breaks = "1 month", date_labels = "%b '%y")+
+  theme_PREM(MajorGrid = "grey75", MinorGrid = "grey85")
+```
+  
+## Observed and Predicted ONI Direction and Magnitude  
+  
+The figure below shows observed ONI values from the most recent complete 48 ONI seasons (circles) as well as predicted ONI values for the next 16 ONI seasons (triangles).  Colored ribbons represent ENSO conditions (El Niño--blue, La Niña--magenta), and increasing ribbon opacity represents increased condition magnitudes (warmer or colder average SSTs for El Niño and La Niña, respectively). The vertical red line represents the date this report was generated.  
+  
+```{r ONI_Projection, fig.align = "center", fig.width = 10, fig.height = 8}
+Last48_Future <- rbind(OniHistoric_Comp[PlotDate >= MaxHistoric - months(48), c("PlotDate", "ThreeMonthOni", "Type")],
+                       TempProbs[,c("PlotDate", "Anomaly", "Type")], use.names = F)
+
+Last48_Future[Type == "Observed", Shape := as.factor(21)]
+Last48_Future[!Type == "Observed", Shape := as.factor(25)]
+
+  ggplot(Last48_Future)+
+    geom_rect(data = AnomalyClass, aes(xmin = MaxHistoric - months(48), xmax = max(TempProbs$PlotDate), ymin = Anomaly_Low,
+                                       ymax = Anomaly_High, fill = Class, alpha = Magnitude))+
+    geom_vline(xintercept = date(Sys.Date()), color = "red", linewidth = 1.5)+
+    geom_line(data = as.data.table(spline(x = Last48_Future$PlotDate, Last48_Future$ThreeMonthOni, n = 1000)),
+              aes(x = as.Date(x, origin = ymd("1970-01-01")), y = y), linewidth = 1.5)+
+    geom_point(aes(PlotDate, ThreeMonthOni, pch = Type), size = 2, fill = "white", stroke = 2)+
+    labs(x = "Center Month of ONI Season (3 months)", y = "ONI")+
+    scale_x_date(date_breaks = "8 months", date_labels = "%b '%y")+
+    # scale_shape_identity()+
+    scale_shape_manual(name = "ONI Value Type", values = c(21, 25))+
+    scale_fill_manual(name = "Climatic Condition", values = c("dodgerblue", "mediumvioletred"))+
+    scale_alpha_manual(values = c(0.2, 0.4, 0.6, 0.7))+
+    theme_PREM(MajorGrid = "grey90", MinorGrid = "grey95")
+
+```
+\  
+  
+# Sources  
+[SST/ONI Projections](https://ftp.cpc.ncep.noaa.gov/wd53du/sstcon34t.txt)  
+  
+[Historic ONI Data](https://origin.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt)  
+  
+[Region map](https://www.ncei.noaa.gov/monitoring-content/teleconnections/nino-regions.gif)  
+  
+[ENSO conditions](https://www.climate.gov/sites/default/files/2022-05/ENSO_US_globes_1200.jpg)  
+  
+[Recent anomaly animation map](https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_update/sstaanim.gif)
